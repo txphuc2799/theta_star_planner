@@ -1,0 +1,9 @@
+<library path="lib/libtheta_star_planner">
+  <class name="theta_star_planner/ThetaStarPlanner"
+         type="theta_star_planner::ThetaStarPlanner"
+         base_class_type="nav_core::BaseGlobalPlanner">
+    <description>
+      A implementation of a grid based planner using A*
+    </description>
+  </class>
+</library>

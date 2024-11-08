@@ -1,0 +1,16 @@
+base_global_planner: theta_star_planner/ThetaStarPlanner
+ThetaStarPlanner:
+  how_many_corners: 8
+  w_euc_cost: 1.0
+  w_traversal_cost: 2.0
+  w_heuristic_cost: 1.0
+  use_smoother: true
+  smooth_plugin_name: simple_smoother::SimpleSmoother
+  SimpleSmoother:
+    max_time: 5.0
+    tolerance: 1e-10
+    max_its: 1000
+    w_data: 0.2
+    w_smooth: 0.3
+    do_refinement: true
+    refinement_num: 2
