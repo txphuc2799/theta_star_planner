@@ -18,6 +18,7 @@
 #include <theta_star_planner/theta_star_planner.hpp>
 #include <theta_star_planner/theta_star.hpp>
 #include <pluginlib/class_list_macros.hpp>
+#include <tf2/utils.h>
 
 PLUGINLIB_EXPORT_CLASS(theta_star_planner::ThetaStarPlanner, nav_core::BaseGlobalPlanner)
 
@@ -76,14 +77,15 @@ void ThetaStarPlanner::initialize(std::string name, costmap_2d::Costmap2DROS* co
 bool ThetaStarPlanner::makePlan(const geometry_msgs::PoseStamped& start, 
   const geometry_msgs::PoseStamped& goal, std::vector<geometry_msgs::PoseStamped>& plan)
 {
+  boost::mutex::scoped_lock lock(mutex_);
   nav_msgs::Path global_path;
-  plan.clear();
 
-  std::unique_lock<costmap_2d::Costmap2D::mutex_t> lock(*(planner_->costmap_->getMutex()));
+  //clear the plan, just in case
+  plan.clear();
 
   //until tf can handle transforming things that are way in the past... we'll require the goal to be in our global frame
   if(goal.header.frame_id != global_frame_){
-    ROS_ERROR(
+    ROS_ERROR("ThetaStarPlanner: "
     "The goal pose passed to this planner must be in the %s frame. "
     "It is instead in the %s frame.", 
     global_frame_.c_str(), goal.header.frame_id.c_str());
@@ -91,7 +93,7 @@ bool ThetaStarPlanner::makePlan(const geometry_msgs::PoseStamped& start,
   }
 
   if(start.header.frame_id != global_frame_){
-    ROS_ERROR(
+    ROS_ERROR("ThetaStarPlanner: "
     "The start pose passed to this planner must be in the %s frame. "
     "It is instead in the %s frame.", 
     global_frame_.c_str(), start.header.frame_id.c_str());
@@ -104,7 +106,7 @@ bool ThetaStarPlanner::makePlan(const geometry_msgs::PoseStamped& start,
       start.pose.position.x, start.pose.position.y, mx_start, my_start))
   {
     ROS_WARN_THROTTLE(
-    1.0, "Start Coordinates of(%f, %f) was outside bounds",
+    1.0, "ThetaStarPlanner: Start Coordinates of(%f, %f) was outside bounds",
     start.pose.position.x, start.pose.position.y);
     return false;
   }
@@ -113,53 +115,48 @@ bool ThetaStarPlanner::makePlan(const geometry_msgs::PoseStamped& start,
       goal.pose.position.x, goal.pose.position.y, mx_goal, my_goal))
   {
     ROS_WARN_THROTTLE(
-    1.0, "Goal Coordinates of(%f, %f) was outside bounds",
+    1.0, "ThetaStarPlanner: Goal Coordinates of(%f, %f) was outside bounds",
     goal.pose.position.x, goal.pose.position.y);
     return false;
   }
 
   if (planner_->costmap_->getCost(mx_goal, my_goal) == costmap_2d::LETHAL_OBSTACLE) {
     ROS_WARN_THROTTLE(
-    1.0, "Goal Coordinates of(%f, %f) was in lethal cost!",
+    1.0, "ThetaStarPlanner: Goal Coordinates of(%f, %f) was in lethal cost!",
     goal.pose.position.x, goal.pose.position.y);
     return false;
   }
 
-  if (mx_start == mx_goal && my_start == my_goal) {
+  if (start.pose.position.x == goal.pose.position.x
+      && start.pose.position.y == goal.pose.position.y) {
     global_path.header.stamp = ros::Time::now();
     global_path.header.frame_id = global_frame_;
     geometry_msgs::PoseStamped pose;
     pose.header = global_path.header;
     pose.pose.position.z = 0.0;
-
-    pose.pose = start.pose;
-    // if we have a different start and goal orientation, set the unique path pose to the goal
-    // orientation, unless use_final_approach_orientation=true where we need it to be the start
-    // orientation to avoid movement from the local planner
-    if (start.pose.orientation != goal.pose.orientation && !use_final_approach_orientation_) {
-      pose.pose.orientation = goal.pose.orientation;
-    }
+    pose.pose = goal.pose;
     plan.push_back(pose);
-    return true;
-  }
 
-  planner_->setStartAndGoal(start, goal);
-  ROS_DEBUG(
-    "Got the src and dst... (%i, %i) && (%i, %i)",
-    planner_->src_.x, planner_->src_.y, planner_->dst_.x, planner_->dst_.y);
-  if (!getPlan(global_path)) {
-    plan.clear();
-    return false;
-  }
-
-  // Publish raw path
-  pub_raw_path_.publish(global_path);
-
-  plan = pathToPosesStamped(global_path, start, goal);
-
-  if (use_smoother_ && !plan.empty()) {
-    if (!execSmoothPath(plan)) {
+  } else {
+    planner_->clearStart();
+    planner_->setStartAndGoal(start, goal);
+    ROS_DEBUG(
+      "ThetaStarPlanner: Got the src and dst... (%i, %i) && (%i, %i)",
+      planner_->src_.x, planner_->src_.y, planner_->dst_.x, planner_->dst_.y);
+    if (!getPlan(global_path)) {
+      plan.clear();
       return false;
+    }
+
+    // Publish raw path
+    pub_raw_path_.publish(global_path);
+
+    plan = pathToPosesStamped(global_path, start, goal);
+
+    if (use_smoother_ && !plan.empty()) {
+      if (!execSmoothPath(plan)) {
+        return false;
+      }
     }
   }
   
@@ -191,7 +188,11 @@ ThetaStarPlanner::pathToPosesStamped(
       pose.pose.orientation.w = 1.0;
       plan.push_back(pose);
     }
-    plan.back().pose.orientation = goal.pose.orientation;
+    
+    geometry_msgs::PoseStamped goal_copy;
+    goal_copy = goal;
+    goal_copy.header.stamp = ros::Time::now();
+    plan.push_back(goal_copy);
 
     // If use_final_approach_orientation=true, interpolate the last pose orientation from the
     // previous pose to set the orientation to the 'final approach' orientation of the robot so
@@ -212,7 +213,7 @@ ThetaStarPlanner::pathToPosesStamped(
       }
     }
   } else {
-    ROS_ERROR("Can't find path because plan size = 0");
+    ROS_ERROR("ThetaStarPlanner: Can't find path because plan size = 0");
   }
   return plan;
 }
@@ -242,13 +243,13 @@ bool ThetaStarPlanner::getPlan(nav_msgs::Path & global_path)
   std::vector<coordsW> path;
   if (planner_->isUnsafeToPlan()) {
     global_path.poses.clear();
-    ROS_WARN("Either of the start or goal pose are an obstacle!");
+    ROS_WARN("ThetaStarPlanner: Either of the start or goal pose are an obstacle!");
     return false;
   } else if (planner_->generatePath(path)) {
     global_path = linearInterpolation(path, planner_->costmap_->getResolution());
   } else {
     global_path.poses.clear();
-    ROS_ERROR("Could not generate path between the given poses");
+    ROS_ERROR("ThetaStarPlanner: Could not generate path between the given poses");
     return false;
   }
   global_path.header.stamp = ros::Time::now();
@@ -261,7 +262,6 @@ nav_msgs::Path ThetaStarPlanner::linearInterpolation(
   const double & dist_bw_points)
 {
   nav_msgs::Path pa;
-  ros::Time plan_time = ros::Time::now();
 
   geometry_msgs::PoseStamped p1;
   for (unsigned int j = 0; j < raw_path.size() - 1; j++) {

@@ -63,6 +63,7 @@ protected:
   bool initialized_;
   bool use_smoother_;
   std::string smooth_plugin_name_;
+  boost::mutex mutex_;
 
   pluginlib::ClassLoader<smoother::Smoother> smoother_loader_;
   std::shared_ptr<smoother::Smoother> smoother_;

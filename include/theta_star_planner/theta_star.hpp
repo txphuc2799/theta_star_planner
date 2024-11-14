@@ -119,6 +119,11 @@ public:
     return !(isSafe(src_.x, src_.y)) || !(isSafe(dst_.x, dst_.y));
   }
 
+  /**
+   * @brief Clear Start
+   */
+  void clearStart();
+
   int nodes_opened = 0;
 
 protected:
