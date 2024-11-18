@@ -189,10 +189,7 @@ ThetaStarPlanner::pathToPosesStamped(
       plan.push_back(pose);
     }
     
-    geometry_msgs::PoseStamped goal_copy;
-    goal_copy = goal;
-    goal_copy.header.stamp = ros::Time::now();
-    plan.push_back(goal_copy);
+    plan.back().pose.orientation = goal.pose.orientation;
 
     // If use_final_approach_orientation=true, interpolate the last pose orientation from the
     // previous pose to set the orientation to the 'final approach' orientation of the robot so
